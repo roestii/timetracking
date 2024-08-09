@@ -109,27 +109,28 @@ pub fn main() !void {
                 return Error.DatabaseError;
             }
 
-            var start: ?[*:0]const u8 = null;
+            const tstmp_len = comptime "yyyy-mm-dd hh:MM:ss".len;
+            var start: ?[tstmp_len]u8 = null;
             const file = try std.fs.cwd().createFile("export.csv", std.fs.File.CreateFlags{});
+            _ = try file.write("start,end\n");
 
             while (true) {
                 switch (c.sqlite3_step(stmt)) {
                     c.SQLITE_ROW => { 
                         // TODO: Append to export
                         const timestamp: [*:0]const u8 = std.mem.span(c.sqlite3_column_text(stmt, 0));
-                        // const datetime = try parseTimestamp(timestamp);
                         if (start == null) {
-                            start = timestamp;
+                            start = timestamp[0..tstmp_len].*;
                         } else {
-                            const buf_len = comptime "yyyy-mm-dd hh:MM:ss".len * 2 + 2;
+                            const buf_len = comptime tstmp_len * 2 + 2;
                             var buf: [buf_len]u8 = undefined;
                             const line = try std.fmt.bufPrint(
                                 &buf,
                                 "{s},{s}\n",
                                 .{start.?, timestamp}
                             );
-                            _ = try file.write(line);
                             start = null;
+                            _ = try file.write(line);
                         }
                     },
                     c.SQLITE_DONE => {
