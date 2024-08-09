@@ -3,7 +3,8 @@ const c = @cImport(@cInclude("sqlite3.h"));
 
 const Error = error{
     UnavailableCommand, 
-    DatabaseError
+    DatabaseError,
+    DateParsingError
 };
 
 fn stepToComplete(stmt: *c.sqlite3_stmt) Error!void {
@@ -26,6 +27,36 @@ fn fetchOne(stmt: *c.sqlite3_stmt) Error!u32 {
         },
         else => return Error.DatabaseError
     }
+}
+ 
+const Datetime = struct {
+    second: u8,
+    minute: u8,
+    hour: u8,
+    day: u8,
+    month: u8,
+    year: u16
+};
+
+fn parseTimestamp(timestamp: [*:0]const u8) Error!Datetime {
+    // NOTE: default layout of the sqlite3 datetime function:
+    // yyyy-mm-dd hh:MM:ss
+    const year = std.fmt.parseInt(u16, timestamp[0..4], 10) catch return Error.DateParsingError;
+    const month = std.fmt.parseInt(u8, timestamp[5..7], 10) catch return Error.DateParsingError;
+    const day = std.fmt.parseInt(u8, timestamp[8..10], 10) catch return Error.DateParsingError;
+    
+    const hour = std.fmt.parseInt(u8, timestamp[11..13], 10) catch return Error.DateParsingError;
+    const minute = std.fmt.parseInt(u8, timestamp[14..16], 10) catch return Error.DateParsingError;
+    const second = std.fmt.parseInt(u8, timestamp[17..19], 10) catch return Error.DateParsingError;
+    
+    return Datetime{
+        .second = second,
+        .minute = minute,
+        .hour = hour,
+        .day = day,
+        .month = month,
+        .year = year
+    };
 }
 
 pub fn main() !void {
@@ -78,12 +109,28 @@ pub fn main() !void {
                 return Error.DatabaseError;
             }
 
+            var start: ?[*:0]const u8 = null;
+            const file = try std.fs.cwd().createFile("export.csv", std.fs.File.CreateFlags{});
+
             while (true) {
                 switch (c.sqlite3_step(stmt)) {
                     c.SQLITE_ROW => { 
                         // TODO: Append to export
                         const timestamp: [*:0]const u8 = std.mem.span(c.sqlite3_column_text(stmt, 0));
-                        std.debug.print("{s}\n", .{timestamp});
+                        // const datetime = try parseTimestamp(timestamp);
+                        if (start == null) {
+                            start = timestamp;
+                        } else {
+                            const buf_len = comptime "yyyy-mm-dd hh:MM:ss".len * 2 + 2;
+                            var buf: [buf_len]u8 = undefined;
+                            const line = try std.fmt.bufPrint(
+                                &buf,
+                                "{s},{s}\n",
+                                .{start.?, timestamp}
+                            );
+                            _ = try file.write(line);
+                            start = null;
+                        }
                     },
                     c.SQLITE_DONE => {
                         // TODO: Finish export
